@@ -1,0 +1,7 @@
+.env
+.env.*
+*.tgz
+*.log
+*.pid
+node_modules/
+screenshots/

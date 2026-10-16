@@ -1,0 +1,17 @@
+{
+  "name": "opencode-agent-flow",
+  "version": "0.1.0",
+  "description": "Live agent flow visualization for OpenCode V2 over its public HTTP API and SSE",
+  "type": "module",
+  "bin": { "opencode-agent-flow": "bin/cli.mjs" },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "author": "orybakov (https://github.com/orybakov)",
+  "repository": { "type": "git", "url": "https://github.com/orybakov/opencode-agent-flow.git" },
+  "bugs": { "url": "https://github.com/orybakov/opencode-agent-flow/issues" },
+  "homepage": "https://github.com/orybakov/opencode-agent-flow#readme",
+  "keywords": ["opencode", "ai-agents", "visualizer", "observability", "webgl"],
+  "exports": {},
+  "files": ["bin", "server.mjs", "lib", "public", "prices.json", "README.md", "LICENSE", "SECURITY.md", "CONTRIBUTING.md", "docs/*.md", "docs/screenshot.png"],
+  "scripts": { "start": "node bin/cli.mjs", "test": "node --test" }
+}

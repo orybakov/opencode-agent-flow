@@ -1,0 +1,10 @@
+{
+  "note": "Illustrative placeholders, USD per 1M tokens, not subscription billing. Context limits are estimates; edit to match your provider.",
+  "default": { "input": 3, "output": 15, "cacheRead": 0.3, "contextLimit": 200000 },
+  "models": {
+    "claude-opus-5-5": { "input": 5, "output": 25, "cacheRead": 0.5, "contextLimit": 200000 },
+    "claude-sonnet-5-5": { "input": 3, "output": 15, "cacheRead": 0.3, "contextLimit": 200000 },
+    "gpt-6.1-sol": { "input": 2.5, "output": 15, "cacheRead": 0.25, "contextLimit": 200000 },
+    "gemini-3.8-flash-high": { "input": 0.5, "output": 3, "cacheRead": 0.05, "contextLimit": 1000000 }
+  }
+}
