@@ -1,6 +1,6 @@
 # OpenCode V2 public API: contributor notes
 
-Contract verified against OpenCode **2.0.30**. The server describes this HTTP API
+Contract verified against OpenCode **2.0.30** and clean **2.0.32**. The server describes this HTTP API
 as experimental. Version checks reject non-V2 servers but do not guarantee that
 every future V2 revision preserves this contract.
 
@@ -83,6 +83,38 @@ Verified against 2.0.30: version, session/active snapshots, pagination, idle
 messages, location-scoped pending requests, Basic authentication and a live global
 stream containing multiple locations. Remote deployments and future versions
 require additional verification; capability changes should fail clearly.
+
+### Clean 2.0.32 verification (2026-10-17)
+
+Installed official `@opencode/cli@2.0.32` locally with isolated HOME/XDG paths;
+the similarly named `opencode-ai` npm package is V1. No existing service or data
+was used. Root and linked child sessions were created through `POST /api/session`
+without model calls. One CLIProxy `gemini-3.8-flash-high` turn read a fixture
+README using `read` and completed successfully.
+
+Session/message/active snapshots and the global SSE envelope still match the
+contract above. Observed 22 frames including `session.tool.input.started/ended`,
+`session.tool.called/success`, `session.step.*`, `session.usage.updated`,
+`session.text.*`, and `session.execution.started/succeeded`. Tool events retain
+`data.sessionID`, `data.assistantMessageID`, and `data.id`. The BFF emitted four
+live state frames (idle → working → tool completion → idle), retained the child,
+and reported 10,301 input tokens, matching the two assistant snapshots. Upstream
+output tokens were zero despite a text answer; the BFF preserves reported usage
+rather than inventing output counts.
+
+Both `/api/state` and `/api/state?session=ID`, `/api/sessions`, and the browser
+session view were verified. Browser viewport: 1440×900; no console errors or
+failed requests (headless WebGL ReadPixels performance warnings only).
+
+Authentication caveat: an unset password does **not** produce an unprotected
+server on this clean version. `serve` generates a password and unauthenticated
+requests return 401. Basic auth works with both its generated password and an
+explicit `OPENCODE_SERVER_PASSWORD`; a real password-free upstream scenario was
+therefore unavailable. Wrong credentials now produce an actionable 401 log
+without exposing credentials, while retaining the existing retry behavior.
+Successful initialization logs the negotiated server version. No event-schema
+adapter changes were needed. Multi-location streams and permission/form flows
+were not re-exercised on 2.0.32; their earlier 2.0.30 checks remain the evidence.
 
 Sources: [API](https://opencode.ai/v2/docs/api),
 [client](https://opencode.ai/v2/docs/build/client), published

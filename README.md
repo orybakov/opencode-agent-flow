@@ -70,7 +70,11 @@ session mode loads the complete selected tree, including dormant children.
   **best-effort**, not a guarantee. Do not expose it to a network without a
   reverse proxy providing authentication. Report vulnerabilities via
   [GitHub Security Advisories](https://github.com/orybakov/opencode-agent-flow/security/advisories/new).
-- Tested against **OpenCode 2.0.30**. The V2 HTTP API is **experimental**; future
+- Tested against **OpenCode 2.0.30** and a clean, isolated **2.0.32** installation
+  (official V2 npm package: `@opencode/cli`, not the V1 `opencode-ai` package).
+  On 2.0.32, `opencode serve` generates a password when none is configured;
+  supply that password or set `OPENCODE_SERVER_PASSWORD` on both processes.
+  The V2 HTTP API is **experimental**; future
   changes may require adapter updates. Non-V2 servers remain in connecting state.
 - SSE is live-only, without replay. Reconciliation recovers durable snapshots,
   not every transient event. No historical permission-decision journal is available.

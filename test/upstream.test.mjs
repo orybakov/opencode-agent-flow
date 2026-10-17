@@ -18,6 +18,18 @@ test('CLI consumes -h as an option value instead of global help', () => {
   assert.equal(child.status, 1); assert.match(child.stderr, /--port must be/); assert(!child.stdout.includes('Usage:'));
 });
 
+test('unprotected upstream works without an Authorization header', async () => {
+  const upstream = await mock((req, res) => {
+    assert.equal(req.headers.authorization, undefined);
+    if (req.url === '/api/info') return json(res, { version: '2.0.32' });
+    if (req.url === '/api/event') { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"type":"server.connected"}\n\n'); return; }
+    return json(res, { data: req.url === '/api/session/active' ? {} : [], cursor: {} });
+  });
+  const client = new Upstream({ ...config(upstream.url), password: undefined }, () => {});
+  try { await client.start(); await waitFor(() => client.connection === 'connected'); assert.equal(client.version, '2.0.32'); }
+  finally { client.stop(); await upstream.close(); }
+});
+
 test('initial connection failure stays connecting and retries instead of rejecting startup', async () => {
   let status = 401;
   const upstream = await mock((req, res) => { res.statusCode = status; json(res, { version: '1.0.0' }); });
@@ -29,6 +41,30 @@ test('initial connection failure stays connecting and retries instead of rejecti
     status = 200;
     assert.equal((await client.get('/api/info')).version, '1.0.0');
   } finally { client.stop(); await upstream.close(); }
+});
+
+test('CLI reports authentication failure without exposing credentials and logs the connected version after recovery', async () => {
+  let authorized = false, output = '';
+  const upstream = await mock((req, res) => {
+    if (!authorized) { res.writeHead(401); return res.end(); }
+    if (req.url === '/api/info') return json(res, { version: '2.0.32' });
+    if (req.url === '/api/event') { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"type":"server.connected"}\n\n'); return; }
+    return json(res, { data: req.url === '/api/session/active' ? {} : [], cursor: {} });
+  });
+  const reservation = await mock((req, res) => res.end());
+  const port = reservation.server.address().port; await reservation.close();
+  const child = spawn(process.execPath, ['bin/cli.mjs', '--server', upstream.url, '--port', String(port)], { cwd: new URL('..', import.meta.url), env: { ...process.env, OPENCODE_SERVER_PASSWORD: 'wrong-secret-test-only' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
+  try {
+    await waitFor(() => output.includes('401: set OPENCODE_SERVER_PASSWORD'));
+    assert(!output.includes('wrong-secret-test-only'));
+    authorized = true;
+    await waitFor(() => output.includes('Connected to OpenCode 2.0.32.'));
+    assert.equal((output.match(/401: set OPENCODE_SERVER_PASSWORD/g) || []).length, 1);
+  } finally {
+    const exit = new Promise(resolve => child.once('exit', resolve));
+    child.kill('SIGTERM'); await exit; await upstream.close();
+  }
 });
 
 test('pagination, dormant descendants, location waits, semantic refresh and reconnect', async () => {
