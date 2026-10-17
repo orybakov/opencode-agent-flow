@@ -7,6 +7,9 @@
 
 **Watch your agents work, not just their logs.**
 
+> **Note:** opencode-agent-flow is a community project. It is not built by the
+> OpenCode team and is not affiliated with them in any way.
+
 A live, read-only visualization of OpenCode V2 orchestration. See agent trees,
 grouped parallel calls, current tools, approval waits, token usage and estimated
 costs in one WebGL dashboard. Connect to a local or remote OpenCode server using
