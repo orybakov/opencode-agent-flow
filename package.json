@@ -1,6 +1,6 @@
 {
   "name": "opencode-agent-flow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live agent flow visualization for OpenCode V2 over its public HTTP API and SSE",
   "type": "module",
   "bin": {
@@ -37,6 +37,7 @@
     "LICENSE",
     "SECURITY.md",
     "CONTRIBUTING.md",
+    "CHANGELOG.md",
     "docs/*.md",
     "docs/screenshot.png"
   ],

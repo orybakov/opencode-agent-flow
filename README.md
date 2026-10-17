@@ -1,5 +1,12 @@
 # opencode-agent-flow
 
+[![npm version](https://img.shields.io/npm/v/opencode-agent-flow)](https://www.npmjs.com/package/opencode-agent-flow)
+[![CI](https://github.com/orybakov/opencode-agent-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/orybakov/opencode-agent-flow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/node/v/opencode-agent-flow)](https://nodejs.org/)
+
+**Watch your agents work, not just their logs.**
+
 A live, read-only visualization of OpenCode V2 orchestration. See agent trees,
 grouped parallel calls, current tools, approval waits, token usage and estimated
 costs in one WebGL dashboard. Connect to a local or remote OpenCode server using
@@ -7,22 +14,78 @@ only its public HTTP API and SSE—no database access required.
 
 Zero runtime npm dependencies. Node.js 20+; no frontend build step.
 
-![Agent Flow demo dashboard](docs/screenshot.png)
+![Live Agent Flow demo: session tree, active tools and animated token transport](https://raw.githubusercontent.com/orybakov/opencode-agent-flow/main/docs/demo.gif)
+
+[Watch the MP4 demo](https://github.com/orybakov/opencode-agent-flow/raw/refs/heads/main/docs/demo.mp4) · fictional data; no credentials or private sessions.
 
 ## Quick start
 
+### Local OpenCode server
+
+Start OpenCode V2 in one terminal:
+
 ```sh
-npx opencode-agent-flow
-# Protected server: supply the password through your environment, not CLI flags.
-OPENCODE_SERVER_PASSWORD="$YOUR_OPENCODE_PASSWORD" npx opencode-agent-flow
-# Remote server
-OPENCODE_SERVER_PASSWORD="$YOUR_OPENCODE_PASSWORD" npx opencode-agent-flow --server https://opencode.example.org
-# Fictional data, no server required
-npx opencode-agent-flow --demo --open
+opencode serve --hostname 127.0.0.1 --port 4096
 ```
+
+In another terminal, set `OPENCODE_SERVER_PASSWORD` to the password printed by
+that server (see below), then run:
+
+```sh
+npx opencode-agent-flow --open
+```
+
+### Remote OpenCode server
+
+Set `OPENCODE_SERVER_PASSWORD` in your local terminal to the remote server's
+password, then connect over HTTPS:
+
+```sh
+npx opencode-agent-flow --server https://opencode.example.org --open
+```
+
+The dashboard itself stays on loopback. The remote server must expose the V2
+HTTP API and SSE; no database access or browser-side credentials are needed.
+
+For a preview without any OpenCode server: `npx opencode-agent-flow --demo --open`.
+Demo tools, agent states and events cycle every 1.5 seconds.
 
 Open <http://127.0.0.1:3340>. For an unpublished local checkout:
 `node bin/cli.mjs --demo`.
+
+## Where do I get the password?
+
+On a clean **OpenCode 2.0.32**, `opencode serve` generates a password when none
+is configured and prints it in the launching terminal on the **`server password`**
+line, after the listening URL. Copy that value privately into the
+`OPENCODE_SERVER_PASSWORD` environment variable of the Agent Flow process.
+The default HTTP Basic username is **`opencode`**; use `--username` or
+`OPENCODE_SERVER_USERNAME` if yours differs.
+
+Alternatively, choose a strong password yourself and set
+`OPENCODE_SERVER_PASSWORD` **before starting `opencode serve`**, then supply the
+same value to Agent Flow. For example, after loading it from your secret manager
+into a shell variable (POSIX shell):
+
+```sh
+export OPENCODE_SERVER_PASSWORD="$YOUR_OPENCODE_PASSWORD"
+opencode serve --hostname 127.0.0.1 --port 4096
+# In another terminal, export the same environment variable, then:
+npx opencode-agent-flow --open
+```
+
+In PowerShell, set an environment variable with
+`$env:OPENCODE_SERVER_PASSWORD = $YourOpenCodePassword` instead. Do not put the
+password in a URL, CLI flag, screenshot, issue or committed config. Agent Flow
+does not discover credentials from the OpenCode database or managed service.
+An already-running server does not inherit environment changes: set the value
+when launching it, not only when launching this dashboard.
+
+The generated-password output and explicit environment password were verified
+against an isolated 2.0.32 installation. Current V2 docs describe the
+[client/server model](https://opencode.ai/v2/docs/cli) and
+[foreground server environment](https://opencode.ai/v2/docs/network#foreground);
+`opencode serve` is distinct from the automatically managed background service.
 
 ## Options
 
@@ -57,7 +120,19 @@ individual-call popovers preserve the orchestration hierarchy.
 including the root. The recent activity window applies to root selection; explicit
 session mode loads the complete selected tree, including dormant children.
 
-## Security and compatibility
+## Compatibility
+
+- Verified with **OpenCode 2.0.30 and 2.0.32** on Linux (official V2 npm package:
+  `@opencode/cli`, not the V1 `opencode-ai` package).
+- Tests pass locally on Linux with **Node.js 20, 22 and 24**.
+- CI runs the test suite, syntax checks and package dry-run on Linux with Node
+  20/22/24, plus **macOS and Windows with Node 22**. Those platforms are covered
+  by CI tests only, not a verified live OpenCode/browser deployment; the first
+  hosted run happens after push.
+- The V2 HTTP API is **experimental**; future changes may require adapter updates.
+  Non-V2 servers remain in connecting state.
+
+## Security and limitations
 
 - Loopback binding by default. **The UI has no authentication**; exposing it on
   another interface reveals session titles, paths and activity. Use an authenticated
@@ -70,12 +145,6 @@ session mode loads the complete selected tree, including dormant children.
   **best-effort**, not a guarantee. Do not expose it to a network without a
   reverse proxy providing authentication. Report vulnerabilities via
   [GitHub Security Advisories](https://github.com/orybakov/opencode-agent-flow/security/advisories/new).
-- Tested against **OpenCode 2.0.30** and a clean, isolated **2.0.32** installation
-  (official V2 npm package: `@opencode/cli`, not the V1 `opencode-ai` package).
-  On 2.0.32, `opencode serve` generates a password when none is configured;
-  supply that password or set `OPENCODE_SERVER_PASSWORD` on both processes.
-  The V2 HTTP API is **experimental**; future
-  changes may require adapter updates. Non-V2 servers remain in connecting state.
 - SSE is live-only, without replay. Reconciliation recovers durable snapshots,
   not every transient event. No historical permission-decision journal is available.
 - Token/cost panels use available history (at least 12 hours/current day for
@@ -91,13 +160,21 @@ subscriptions may differ, and these figures are not billing statements.
 
 ```sh
 node bin/cli.mjs --demo
-node --test
+node scripts/check-syntax.mjs
+npm test
 npm pack --dry-run
 ```
 
 See [architecture](docs/architecture.md) and
 [public API notes](docs/opencode-v2-api-notes.md). Vendored browser modules avoid
 CDN/network dependencies; there is no install or bundling step.
+
+## Roadmap
+
+- Ensemble team views and richer orchestration context.
+- Memory and rendering performance for thousands of sessions.
+- A small, ready-to-run Docker image.
+- Additional themes and visual customization.
 
 ## License and acknowledgements
 

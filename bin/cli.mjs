@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { start } from '../server.mjs';
 process.on('unhandledRejection', error => console.error('Unhandled rejection:', error?.name || 'Error'));
 process.on('uncaughtException', error => console.error('Uncaught exception:', error?.name || 'Error'));
 
-const help = `opencode-agent-flow 0.1.0 — live OpenCode V2 agent visualization
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const help = `opencode-agent-flow ${version} — live OpenCode V2 agent visualization
 
 Usage: npx opencode-agent-flow [options]
   --server URL      OpenCode V2 URL (OPENCODE_URL; http://127.0.0.1:4096)
