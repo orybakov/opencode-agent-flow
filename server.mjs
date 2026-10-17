@@ -15,7 +15,7 @@ const json = s => { try { return JSON.parse(s || '{}'); } catch { return {}; } }
 const modelId = m => clip((typeof m === 'string' ? m : m?.id || m?.modelID) || 'unknown', 100);
 const rate = m => prices.models[m] || Object.entries(prices.models).find(([k]) => m.startsWith(k))?.[1] || prices.default;
 let snapshot, signature = '', timer;
-const upstream = config.demo ? demo() : new Upstream(config, schedule);
+const upstream = config.demo ? demo(schedule) : new Upstream(config, schedule);
 let approvals = [], permissionHealth = { ok: false, status: null };
 const clients = new Set();
 const rowCache = new Map();

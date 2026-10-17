@@ -10,7 +10,7 @@ test('demo preserves grouped browser contracts without credentials or upstream a
     assert.equal(response.status, 200);
     const text = await response.text(), state = JSON.parse(text);
     assert(!text.includes('fixture-secret-never-exposed'));
-    assert.equal(state.serverVersion, '2.0.30');
+    assert.equal(state.serverVersion, '2.0.32');
     assert.equal(state.roots[0].agentCount, 6);
     assert.equal(state.roots[0].callCount, 7);
     assert.equal(state.agents.find(a => a.agent === 'builder').count, 2);
