@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussions
+    url: https://github.com/orybakov/opencode-agent-flow/discussions
+    about: Ask questions and share ideas.
+  - name: Security vulnerability
+    url: https://github.com/orybakov/opencode-agent-flow/blob/main/SECURITY.md
+    about: Follow the private reporting instructions; do not open a public issue.

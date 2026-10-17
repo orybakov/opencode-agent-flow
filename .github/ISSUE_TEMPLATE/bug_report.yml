@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem (never include secrets).
+body:
+  - type: markdown
+    attributes:
+      value: "Redact passwords, authorization headers, API keys, private paths and session content. Report vulnerabilities through SECURITY.md instead."
+  - type: input
+    id: version
+    attributes:
+      label: opencode-agent-flow version
+      placeholder: 0.1.1
+    validations:
+      required: true
+  - type: input
+    id: opencode
+    attributes:
+      label: OpenCode version
+      description: Output of opencode --version (V2).
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of node --version.
+    validations:
+      required: true
+  - type: textarea
+    id: launch
+    attributes:
+      label: Launch method
+      description: npx or checkout, local or remote server, browser and flags. Do not paste credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: BFF log (redacted)
+      description: Review and remove all secrets before submitting.
+      render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Optional; redact private session titles, paths and content.
