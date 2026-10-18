@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Reduce history to model/hour/day usage, exact recent timestamp counters, three representative messages and a bounded event tail; replace reductions on refresh to avoid double-counting.
 - Retain four history scopes for five minutes and four scoped snapshots for one minute; share serialized state and small signatures between SSE clients.
 - Bound upstream SSE frames to 64 KiB; oversized payloads reconcile snapshots instead of retaining tool-output buffers.
+- Reconcile versions after the first SSE handshake without immediately loading every unchanged history a second time; reconnects still force full reconciliation.
 
 ### Added
 

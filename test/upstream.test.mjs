@@ -123,6 +123,21 @@ test('message fetch concurrency is bounded to one', async () => {
   finally { client.stop(); await upstream.close(); }
 });
 
+test('initial SSE handshake does not immediately reload unchanged histories', async () => {
+  const now = Date.now(), messageCalls = { ses_stable: 0, ses_changed: 0 }; let connected = false, generation = 0;
+  const server = await mock((req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    if (url.pathname === '/api/info') return json(res, { version: '2.0.30' });
+    if (url.pathname === '/api/event') { connected = true; generation = 1; res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"type":"server.connected"}\n\n'); return; }
+    if (url.pathname === '/api/session') return json(res, { data: url.searchParams.has('parentID') ? [] : [{ id: 'ses_stable', time: { updated: now } }, { id: 'ses_changed', time: { updated: now + generation } }] });
+    if (url.pathname.endsWith('/message')) { const id = url.pathname.split('/')[3]; messageCalls[id]++; return json(res, { data: [{ id: `msg_${id}`, type: 'assistant', time: { created: now }, finish: String(generation) }] }); }
+    return json(res, { data: {} });
+  });
+  const client = new Upstream(config(server.url), () => {});
+  try { await client.start(); await waitFor(() => connected && client.connection === 'connected'); await client.sync(); assert.deepEqual(messageCalls, { ses_stable: 1, ses_changed: 2 }); assert.equal(client.messages.get('ses_changed')[0].finish, '1'); }
+  finally { client.stop(); await server.close(); }
+});
+
 test('separate CLI process retries a broken upstream with exponential backoff', async () => {
   let attempts = 0, output = '';
   const upstream = await mock((req, res) => {
