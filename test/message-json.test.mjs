@@ -36,3 +36,42 @@ test('opaque pagination cursors are not truncated like display strings', async (
   async function* body() { yield Buffer.from(JSON.stringify({ data: [], cursor: { next: cursor } })); }
   assert.equal((await readMessagePage(body())).cursor.next, cursor);
 });
+
+test('escapes, surrogate pairs, backslashes and exponents survive 1/2/3-byte chunks', async () => {
+  const text = String.raw`{"data":[{"id":"msg","type":"assistant","tokens":{"input":-1.25e+3},"content":[{"type":"text","text":"A\u0042\ud83d\ude42\\tail"}]}],"cursor":{"next":null}}`;
+  for (const size of [1, 2, 3]) {
+    const bytes = Buffer.from(text);
+    async function* body() { for (let i = 0; i < bytes.length; i += size) yield bytes.subarray(i, i + size); }
+    assert.deepEqual((await readMessagePage(body())).data.map(trimMessage), JSON.parse(text).data.map(trimMessage));
+  }
+});
+
+test('truncation does not split a raw or escaped UTF-16 surrogate pair', async () => {
+  for (const prefix of [298, 299]) for (const escaped of [false, true]) for (const size of [1, 2, 3]) {
+    const source = { data: [{ content: [{ type: 'text', text: 'x'.repeat(prefix) + '🙂tail' }] }] };
+    let text = JSON.stringify(source); if (escaped) text = text.replace('🙂', String.raw`\ud83d\ude42`);
+    const bytes = Buffer.from(text);
+    async function* body() { for (let i = 0; i < bytes.length; i += size) yield bytes.subarray(i, i + size); }
+    const actual = (await readMessagePage(body())).data[0].content[0].text;
+    assert.equal(actual, 'x'.repeat(prefix) + (prefix === 298 ? '🙂' : ''));
+    assert.equal(trimMessage(source.data[0]).content[0].text, actual);
+  }
+});
+
+test('truncated numbers and non-whitespace after the root are rejected', async () => {
+  for (const text of ['1e', '-2e+', '{"data":[{"tokens":{"input":1e', '{}false', '{}{}', '{} garbage', '{},', '{}]']) {
+    async function* body() { for (const char of text) yield Buffer.from(char); }
+    await assert.rejects(readMessagePage(body()));
+  }
+  for (const value of [false, null, 0]) {
+    async function* body() { yield Buffer.from(JSON.stringify(value) + ' \n'); }
+    assert.equal(await readMessagePage(body()), value);
+  }
+});
+
+test('non-scalar input fields are omitted, not converted to undefined strings', async () => {
+  async function* body() { yield Buffer.from('{"data":[{"content":[{"state":{"input":{"code":{},"command":[],"path":123,"query":null,"description":true}}}]}]}'); }
+  const input = (await readMessagePage(body())).data[0].content[0].state.input;
+  assert.deepEqual(input, { path: '123', query: 'null', description: 'true' });
+  assert.deepEqual(trimMessage({ content: [{ state: { input: { code: {}, command: [], path: 123, query: null, description: true, agent: undefined } } }] }).content[0].state.input, input);
+});

@@ -18,6 +18,7 @@ let snapshot, signature = '', timer;
 const upstream = config.demo ? demo(schedule) : new Upstream(config, schedule);
 let approvals = [], permissionHealth = { ok: false, status: null };
 const clients = new Set();
+const pendingStreams = new Set();
 const rowCache = new Map();
 const agentCache = new Map();
 const rows = id => { const messages = upstream.messages.get(id), cached = rowCache.get(id); if (cached && cached.source === messages) return cached.rows; const result = (messages || []).map((m, seq) => ({ id: m.id, session_id: id, seq, type: m.type, time_created: m.time?.created || 0, time_updated: m.time?.completed || m.time?.streamed || m.time?.created || 0, parsed: m })); rowCache.set(id, { source: messages, rows: result }); return result; };
@@ -143,8 +144,8 @@ function buildState(sessionId) {
 }
 function stateFor(sessionId) {
   if (!sessionId) return snapshot;
-   const cached = scopedSnapshots.get(sessionId), state = cached && Date.now() - cached.created < 60000 ? cached.state : buildState(sessionId);
-   scopedSnapshots.delete(sessionId); scopedSnapshots.set(sessionId, { state, created: Date.now() });
+   const cached = scopedSnapshots.get(sessionId), state = cached && Date.now() - cached.created < 10000 ? cached.state : buildState(sessionId);
+   scopedSnapshots.delete(sessionId); scopedSnapshots.set(sessionId, { state, created: state === cached?.state ? cached.created : Date.now() });
    while (scopedSnapshots.size > 4) scopedSnapshots.delete(scopedSnapshots.keys().next().value);
    return state;
 }
@@ -155,7 +156,7 @@ function refresh() {
      for (const id of rowCache.keys()) if (!upstream.sessions.has(id)) { rowCache.delete(id); agentCache.delete(id); }
      const next = buildState(), sig = wireFor(next).signature;
     if (sig !== signature) { signature = sig; snapshot = next; }
-     for (const client of clients) { const wire = wireFor(stateFor(client.sessionId)); if (client.signature !== wire.signature && send(client, wire.frame)) client.signature = wire.signature; }
+      for (const client of clients) { if (client.scopeReady === false || client.sessionId && scopeLoads.has(client.sessionId)) continue; const wire = wireFor(stateFor(client.sessionId)); if (client.signature !== wire.signature && send(client, wire.frame)) client.signature = wire.signature; }
   } catch { console.error('State refresh failed; retaining last snapshot.'); }
 }
 function schedule() { if (!timer) timer = setTimeout(() => { timer = null; refresh(); }, 250); }
@@ -169,12 +170,31 @@ const files = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 
 // Explicit allowlist: no arbitrary filesystem access for vendor/module URLs.
 for (const file of ['flow-webgl.js', ...['three.module.min.js', 'three.core.min.js', ...['EffectComposer', 'RenderPass', 'UnrealBloomPass', 'OutputPass', 'ShaderPass', 'MaskPass', 'Pass'].map(name => `postprocessing/${name}.js`), ...['CopyShader', 'LuminosityHighPassShader', 'OutputShader'].map(name => `shaders/${name}.js`)].map(name => `vendor/three/${name}`)]) files[`/${file}`] = [file, 'text/javascript'];
 const loadedScopes = new Map(), scopeLoads = new Map();
+function rememberScope(id) {
+  loadedScopes.delete(id); loadedScopes.set(id, Date.now());
+  while (loadedScopes.size > 4) { const old = [...loadedScopes.keys()].find(key => ![...clients].some(c => c.sessionId === key)); if (!old) break; loadedScopes.delete(old); }
+}
+function ensureScope(id) {
+  if (scopeLoads.has(id)) return scopeLoads.get(id);
+  if (upstream.touchScope ? upstream.touchScope(id) : loadedScopes.has(id)) { rememberScope(id); return Promise.resolve(); }
+  loadedScopes.delete(id); scopedSnapshots.delete(id);
+  const load = upstream.ensureTree(id).then(() => rememberScope(id)).finally(() => scopeLoads.delete(id));
+  scopeLoads.set(id, load);
+  return load.then(() => refresh());
+}
 const staticCache = new Map(Object.entries(files).map(([url, [file, type]]) => [url, [readFileSync(join(base, 'public', file)), type]]));
 const importmap = staticCache.get('/')[0].toString().match(/<script type="importmap">(.*?)<\/script>/s)?.[1];
 const csp = `default-src 'self'; script-src 'self' 'sha256-${createHash('sha256').update(importmap || '').digest('base64')}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`;
 try { await upstream.start(); } catch (error) { upstream.stop(); clearTimeout(timer); throw error; }
 refresh();
-const heartbeat = setInterval(() => { for (const c of clients) { if (c.blocked) { clients.delete(c); c.destroy(); } else { if (c.sessionId) { loadedScopes.set(c.sessionId, Date.now()); upstream.touchScope?.(c.sessionId); } send(c, ': heartbeat\n\n'); } } }, 15000);
+const heartbeat = setInterval(() => { for (const c of clients) {
+  if (c.blocked) { clients.delete(c); c.destroy(); continue; }
+  if (c.sessionId) {
+    if (loadedScopes.has(c.sessionId) && (upstream.touchScope ? upstream.touchScope(c.sessionId) : true)) rememberScope(c.sessionId);
+    else { loadedScopes.delete(c.sessionId); c.scopeReady = false; void ensureScope(c.sessionId).then(() => { if (!c.destroyed) { c.scopeReady = true; refresh(); } }).catch(() => console.error('OpenCode scope restoration failed.')); }
+  }
+  send(c, ': heartbeat\n\n');
+} }, config.heartbeatInterval ?? 15000);
 const normalizeHost = host => host.toLowerCase().replace(/^\[|\]$/g, '');
 const allowed = new Set(['localhost', '127.0.0.1', '::1', normalizeHost(config.host), ...(config.allowedHosts || []).map(normalizeHost)]);
 function permitted(authority) { try { const url = new URL(`http://${authority}`); return !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' && allowed.has(normalizeHost(url.hostname)) && Number(url.port || 80) === server.address().port; } catch { return false; } }
@@ -185,22 +205,29 @@ const server = http.createServer(async (req, res) => {
   if (!req.url.startsWith('/') || req.url.startsWith('//')) { res.writeHead(400); return res.end('Invalid request URL'); }
   const url = new URL(req.url, 'http://localhost'), path = url.pathname, sessionId = url.searchParams.get('session');
   if (path.startsWith('/api/') && req.headers.origin) { let origin; try { origin = new URL(req.headers.origin); } catch {} if (!origin || origin.origin !== req.headers.origin || !['http:', 'https:'].includes(origin.protocol) || !permitted(origin.host)) { res.writeHead(403); return res.end('Forbidden origin'); } }
-  if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); return res.end(); }
+   if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); return res.end(); }
+   if (path === '/api/stream') {
+     if (clients.size + pendingStreams.size >= 32) { res.writeHead(503); return res.end('Too many clients'); }
+     pendingStreams.add(res); res.once('close', () => pendingStreams.delete(res));
+   }
    for (const [id, touched] of loadedScopes) if (Date.now() - touched >= 300000) loadedScopes.delete(id);
-   if (sessionId && loadedScopes.has(sessionId) && ['/api/state', '/api/stream'].includes(path)) { loadedScopes.delete(sessionId); loadedScopes.set(sessionId, Date.now()); upstream.touchScope?.(sessionId); }
-  if (sessionId && ['/api/state', '/api/stream'].includes(path) && !loadedScopes.has(sessionId)) {
-    if (!/^ses_[\w-]+$/.test(sessionId)) { res.writeHead(400); return res.end('Invalid session ID'); }
-    try {
-       if (!scopeLoads.has(sessionId)) scopeLoads.set(sessionId, upstream.ensureTree(sessionId).then(() => { loadedScopes.set(sessionId, Date.now()); while (loadedScopes.size > 4) loadedScopes.delete(loadedScopes.keys().next().value); refresh(); }).finally(() => scopeLoads.delete(sessionId)));
-      await scopeLoads.get(sessionId);
+   if (sessionId && ['/api/state', '/api/stream'].includes(path)) {
+     if (!/^ses_[\w-]+$/.test(sessionId)) { res.writeHead(400); return res.end('Invalid session ID'); }
+     if (path === '/api/stream') {
+       if (clients.size >= 32) { res.writeHead(503); return res.end('Too many clients'); }
+       upstream.pinScope?.(sessionId); res.once('close', () => upstream.unpinScope?.(sessionId));
+     }
+     try {
+       await ensureScope(sessionId);
     } catch { res.writeHead(502); return res.end('Unable to load OpenCode session'); }
   }
   if (path === '/api/stream') {
     if (clients.size >= 32) { res.writeHead(503); return res.end('Too many clients'); }
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.sessionId = sessionId;
+     res.sessionId = sessionId;
+     res.scopeReady = true;
      const wire = wireFor(stateFor(sessionId)); res.signature = wire.signature;
-     clients.add(res); send(res, wire.frame); req.on('close', () => clients.delete(res)); return;
+      pendingStreams.delete(res); clients.add(res); send(res, wire.frame); res.on('close', () => clients.delete(res)); return;
   }
   if (path === '/api/sessions') {
     if (!snapshot) { res.writeHead(503, { 'Content-Type': 'application/json' }); return res.end('[]'); }

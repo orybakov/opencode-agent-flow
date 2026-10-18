@@ -9,9 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - Stream and project upstream message JSON before materializing tool outputs or long text; use ten-message pages and one bounded loading job.
-- Use native HTTP(S) streaming instead of loading Undici into the backend.
-- Reduce history to model/hour/day usage, exact recent timestamp counters, three representative messages and a bounded event tail; replace reductions on refresh to avoid double-counting.
-- Retain four history scopes for five minutes and four scoped snapshots for one minute; share serialized state and small signatures between SSE clients.
+- Use native HTTP(S) streaming instead of loading Undici into the backend; request identity encoding and explicitly reject redirects and credentials in server URLs.
+- Reduce history to model/hour/day usage, exact recent timestamp counters, three representative messages and a bounded event tail; replace contributions rather than double-counting snapshots.
+- Retain a four-scope LRU for five minutes (active SSE scopes are pinned within the 32-client cap) and four scoped snapshots with an absolute ten-second TTL; share serialized state and small signatures between SSE clients.
 - Bound upstream SSE frames to 64 KiB; oversized payloads reconcile snapshots instead of retaining tool-output buffers.
 - Reconcile versions after the first SSE handshake without immediately loading every unchanged history a second time; reconnects still force full reconciliation.
 - Skip scalar/key allocations in discarded JSON subtrees and truncate event tails before cloning display rows, while preserving complete heatmap counts.
@@ -19,6 +19,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Regression tests for streamed projection, oversized SSE frames, aggregate parity, history bounds and scope expiry.
+
+### Fixed
+
+- Coalesce all session loads into one running request plus one repeat flag. Live updates replace contributions for the latest 32 messages and stop at a known page; a missing anchor or explicit force rebuilds the older aggregate base. Recent loads update message versions too.
+- Keep permissions/forms, session metadata and descendant discovery on a separate two-job control lane, independent of the one-job history lane.
+- Invalidate an identified session on oversized SSE frames; otherwise retain one pending forced reconciliation across an in-flight sync, throttled to once per ten seconds.
+- Restore lost SSE scopes before publishing replacement state; heartbeats only touch existing scopes, and active scopes cannot be silently LRU-evicted.
+- Preserve surrogate pairs at string truncation, omit projected non-scalar input values, and reject truncated numbers and trailing data after the JSON root.
 
 ## [0.1.1] - 2026-10-17
 

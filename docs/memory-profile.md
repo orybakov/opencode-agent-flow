@@ -110,11 +110,25 @@ tail per session. Old history no longer retains one object per message or text
 byte. Exact rolling cache-hit/heat counters still scale with **distinct recent
 timestamps** within fixed time windows; this is not a claim of constant memory
 under arbitrarily high event rates or an arbitrary number of sessions/models.
-Dirty sessions scan the relevant history again to replace mutable usage rather
-than retaining a per-message contribution index. This increases small upstream
-requests, but avoids an unbounded historical cache and double-counted tokens.
+The prerelease-review follow-up replaces that full scan on every dirty batch
+with a bounded 32-message contribution tail plus an older aggregate base. Recent
+pages stop at a known tail ID; updated contributions replace their prior values.
+A missing anchor or forced reconciliation rebuilds the base. The contribution
+tail is bounded independently of historical message count, but adds fixed
+per-session overhead compared with the original reduction-only implementation.
 
-Scoped reductions use a four-entry LRU and five-minute idle TTL; rendered scope
-snapshots use four entries and a one-minute TTL. SSE clients share serialization
+Scoped reductions use a four-entry LRU and five-minute idle TTL, except that
+active SSE scopes are pinned within the 32-client cap. Rendered scope snapshots
+use four entries and an absolute ten-second TTL. SSE clients share serialization
 and retain only content hashes. Upstream frames above 64 KiB are discarded and
 reconciled from HTTP snapshots rather than parsed as large tool-output strings.
+
+### Known counter bound (review item 8)
+
+`heat`/`globalHeat` Maps retain exact event-timestamp counters within one hour;
+`window` Maps retain exact input/cache-read timestamp counters within the
+configured rolling window. The base, bounded tail contributions and published
+reduction all prune these counters. Their cardinality still depends on the
+number of distinct timestamps in those windows: they are **not** a fixed-size
+ring or a hard memory cap under arbitrarily high event rates. Old message bodies
+and tool outputs do not affect their retained size.

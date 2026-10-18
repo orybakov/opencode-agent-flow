@@ -33,19 +33,30 @@ are preserved in full.
 
 Pages are reduced immediately into per-model totals, per-day/hour usage and
 numeric recent timestamp counters (four-hour cache-hit window and one-hour
-heatmap with the default configuration). Only three small latest/context
-representatives and 200 events per session survive. Full-history refreshes
-replace reductions, rather than merging cumulative token snapshots. A dirty
-session scans its relevant history again so mutable assistant usage is not
-double-counted; this trades additional small local requests for bounded history
-retention. Exact recent counters scale with distinct timestamps within their
+heatmap with the default configuration). The exposed reduction keeps three
+small latest/context representatives and 200 events per session. Internally,
+32 per-message contributions form a replaceable tail over an older aggregate
+base. A dirty session reads newest pages until a known tail ID is reached;
+changed contributions replace, not add to, their previous snapshots. Missing
+anchors and explicit full reconciliations rebuild the base. Session loads share
+one per-ID running/repeat job, while permissions/forms and descendant discovery
+use a separate control lane. Exact recent counters scale with distinct timestamps within their
 fixed time windows, not with old history or message/output byte sizes.
 
-History scopes use a four-entry LRU with a five-minute idle TTL. Scoped rendered
-snapshots use four entries and a one-minute TTL; active SSE clients touch their
-scope during heartbeats. State is serialized once per snapshot and shared by
+History scopes use a four-entry LRU with a five-minute idle TTL; active SSE
+scopes are pinned (bounded by the 32-client limit, including pending handshakes).
+Scoped rendered snapshots use four entries and an absolute ten-second TTL;
+heartbeats touch existing scopes or restore missing ones before publishing any
+new scoped state. State is serialized once per snapshot and shared by
 clients; each client retains only a small content hash. Static assets remain
 Buffers, not decoded copies.
+
+Oversized SSE frames retain a bounded set of identifiable session IDs for dirty
+invalidation. Unidentified frames request one pending full reconciliation,
+including when another sync is already running; those forced recoveries are
+limited to one per ten seconds. Native HTTP(S) requests send
+`Accept-Encoding: identity`, reject 3xx responses without following Location,
+and reject credentials embedded in the server URL.
 
 Messages contain `id`, `type`, `time.created`, and assistant `content`, `model`,
 `tokens`, optional `finish`, `time.streamed/completed`. Tool content contains

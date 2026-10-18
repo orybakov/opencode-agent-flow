@@ -12,6 +12,12 @@ test('oversized SSE frames are discarded with bounded buffering and reconciled',
   const decoder = new EventFrames(100);
   decoder.push('data: ');
   for (let i = 0; i < 10000; i++) { const batch = decoder.push('x'.repeat(70)); assert(batch.frames.length === 0); assert(decoder.buffer.length <= 100); }
-  assert.deepEqual(decoder.push('\n\ndata: next\n\n'), { frames: ['data: next'], overflow: true });
-  assert.deepEqual(decoder.push(`data: ${'x'.repeat(1000)}\n\n`), { frames: [], overflow: true });
+  assert.deepEqual(decoder.push('\n\ndata: next\n\n'), { frames: ['data: next'], overflow: true, unknownOverflow: true });
+  assert.deepEqual(decoder.push(`data: ${'x'.repeat(1000)}\n\n`), { frames: [], overflow: true, unknownOverflow: true });
+});
+
+test('oversized frames retain bounded session invalidation identifiers', () => {
+  const decoder = new EventFrames(100);
+  decoder.push('data: {"data":{"sessionID":"ses_target","output":"' + 'x'.repeat(200));
+  assert.deepEqual(decoder.push('x'.repeat(200) + '"}}\n\n'), { frames: [], overflow: true, sessionIds: ['ses_target'] });
 });
