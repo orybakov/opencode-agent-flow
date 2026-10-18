@@ -24,6 +24,29 @@ sessions are not automatically excluded. A session directory is
 `session.location.directory`; parentID is a tree edge, while fork is not.
 Old descendants must be loaded independently of an updated-time cutoff.
 
+The 2.0.30 `/openapi.json` message list contract exposes only `limit`, `order`,
+`cursor`, and `type`; there is no field projection. The dashboard therefore
+uses ten-message pages with a streaming JSON projection. Tool outputs, prompts,
+reasoning and unknown fields are skipped before creating strings; display text
+and permitted tool inputs are limited to 300 UTF-16 code units. Opaque cursors
+are preserved in full.
+
+Pages are reduced immediately into per-model totals, per-day/hour usage and
+numeric recent timestamp counters (four-hour cache-hit window and one-hour
+heatmap with the default configuration). Only three small latest/context
+representatives and 200 events per session survive. Full-history refreshes
+replace reductions, rather than merging cumulative token snapshots. A dirty
+session scans its relevant history again so mutable assistant usage is not
+double-counted; this trades additional small local requests for bounded history
+retention. Exact recent counters scale with distinct timestamps within their
+fixed time windows, not with old history or message/output byte sizes.
+
+History scopes use a four-entry LRU with a five-minute idle TTL. Scoped rendered
+snapshots use four entries and a one-minute TTL; active SSE clients touch their
+scope during heartbeats. State is serialized once per snapshot and shared by
+clients; each client retains only a small content hash. Static assets remain
+Buffers, not decoded copies.
+
 Messages contain `id`, `type`, `time.created`, and assistant `content`, `model`,
 `tokens`, optional `finish`, `time.streamed/completed`. Tool content contains
 `id`, `name`, `state.input/status`, `time.created/ran/completed`. Statuses are

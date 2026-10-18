@@ -6,13 +6,13 @@ import { Upstream } from './lib/upstream.mjs';
 import { demo } from './lib/demo.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { modelId, toolInfo } from './lib/message-summary.mjs';
 
 const base = dirname(fileURLToPath(import.meta.url));
 export async function start(config) {
 const hours = config.window, port = config.port;
 const prices = JSON.parse(readFileSync(join(base, 'prices.json'), 'utf8'));
 const json = s => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
-const modelId = m => clip((typeof m === 'string' ? m : m?.id || m?.modelID) || 'unknown', 100);
 const rate = m => prices.models[m] || Object.entries(prices.models).find(([k]) => m.startsWith(k))?.[1] || prices.default;
 let snapshot, signature = '', timer;
 const upstream = config.demo ? demo(schedule) : new Upstream(config, schedule);
@@ -22,14 +22,11 @@ const rowCache = new Map();
 const agentCache = new Map();
 const rows = id => { const messages = upstream.messages.get(id), cached = rowCache.get(id); if (cached && cached.source === messages) return cached.rows; const result = (messages || []).map((m, seq) => ({ id: m.id, session_id: id, seq, type: m.type, time_created: m.time?.created || 0, time_updated: m.time?.completed || m.time?.streamed || m.time?.created || 0, parsed: m })); rowCache.set(id, { source: messages, rows: result }); return result; };
 const scopedSnapshots = new Map();
-function toolInfo(c, fallback) {
-  const input = c.state?.input || c.input || {};
-  let name = c.name || c.tool || 'tool';
-  if (name === 'execute') {
-    const m = input.code?.match(/tools\.([\w]+)(?:\.([\w-]+)|\[['"]([^'"]+)['"]\])/);
-    if (m) name = `${m[1]}.${m[2] || m[3]}`;
-  }
-  return { name: clip(name, 80), target: clip(input.filePath || input.path || input.pattern || input.command || input.query || input.url || input.agent || input.description || ''), since: c.time?.created || c.state?.time?.start || fallback };
+const serialized = new WeakMap();
+function wireFor(state) {
+  let wire = serialized.get(state);
+  if (!wire) { const json = JSON.stringify(state); wire = { json, frame: `event: state\ndata: ${json}\n\n`, signature: createHash('sha256').update(JSON.stringify({ ...state, updatedAt: 0 })).digest('hex') }; serialized.set(state, wire); }
+  return wire;
 }
 function buildState(sessionId) {
     const now = Date.now(), midnight = new Date().setHours(0, 0, 0, 0);
@@ -39,9 +36,21 @@ function buildState(sessionId) {
     let added = true;
     while (added) { added = false; for (const s of sessions) if (selected.has(s.parent_id) && !selected.has(s.id)) { selected.add(s.id); added = true; } }
     const scopedApprovals = sessionId ? approvals.filter(p => selected.has(p.sessionID)) : approvals;
-    const sourceMessages = [...upstream.messages.keys()].filter(id => !sessionId || selected.has(id)).flatMap(rows).filter(r => sessionId || Math.max(r.time_created, r.time_updated) >= upstream.cutoff());
+     const sourceMessages = [...upstream.messages.keys()].filter(id => (!sessionId || selected.has(id)) && !upstream.summaries?.has(id)).flatMap(rows).filter(r => sessionId || Math.max(r.time_created, r.time_updated) >= upstream.cutoff());
     const grouped = new Map(), events = [], today = {}, hourly = Array.from({ length: 12 }, (_, i) => ({ time: Math.floor(now / 3600000) * 3600000 - (11 - i) * 3600000, models: {}, total: 0 }));
-    let input = 0, cacheRead = 0;
+     let input = 0, cacheRead = 0;
+     const addUsage = (model, t) => {
+       const v = today[model] ||= { input: 0, output: 0, cacheRead: 0, total: 0, estimate: 0 };
+       v.input += t.input; v.output += t.output; v.cacheRead += t.cacheRead; v.total += t.input + t.output + t.cacheRead;
+       const p = rate(model); v.estimate += (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead) / 1e6;
+     };
+     for (const [id, summary] of upstream.summaries || []) {
+       if (sessionId && !selected.has(id)) continue;
+       summary.prune(now);
+       for (const [model, t] of (sessionId ? summary.all : summary.days.get(midnight)) || []) addUsage(model, t);
+       for (const bucket of hourly) for (const [model, t] of summary.hourly.get(bucket.time) || []) { const total = t.input + t.output + t.cacheRead; bucket.models[model] = (bucket.models[model] || 0) + total; bucket.total += total; }
+       for (const [time, t] of summary.window) if (time >= now - hours * 3600000) { input += t[0]; cacheRead += t[1]; }
+     }
     const addEvent = e => events.push(e);
     for (const r of sourceMessages) {
       if (!grouped.has(r.session_id)) grouped.set(r.session_id, []);
@@ -75,7 +84,9 @@ function buildState(sessionId) {
        const fresh = upstream.active[s.id] || now - (latest?.time_updated || s.time_updated) < 120000;
        const currentTool = fresh && active.length ? toolInfo(active.at(-1), assistant.time_created) : null;
        const status = approvals.some(p => p.sessionID === s.id) ? 'waiting' : currentTool || upstream.active[s.id] ? 'working' : latest?.type === 'idle' && s.parent_id ? 'done' : 'idle';
-      for (const r of list) {
+       const summary = upstream.summaries?.get(s.id);
+       if (summary) for (const event of summary.displayEvents(!!sessionId, upstream.cutoff())) addEvent({ ...event, sessionId: s.id, agent: s.agent || clip(s.title).slice(0, 20) || 'untitled' });
+       for (const r of summary ? [] : list) {
         const d = r.parsed, common = { sessionId: s.id, agent: s.agent || clip(s.title).slice(0, 20) || 'untitled' };
         if (r.type === 'idle') addEvent({ ...common, time: r.time_created, kind: 'idle', text: clip(d.outcome || 'finished') });
         if (r.type !== 'assistant') continue;
@@ -120,7 +131,10 @@ function buildState(sessionId) {
       return { id: s.id, groups: groupChildren([s.id], s.id) };
     });
     const displayEvents = events.filter(e => sessionGroups.has(e.sessionId)).map(e => ({ ...e, agent: sessionGroups.get(e.sessionId).agent, groupId: sessionGroups.get(e.sessionId).id }));
-    const heat = groups.map(a => ({ id: a.id, agent: a.agent, values: Array.from({ length: 12 }, (_, i) => displayEvents.filter(e => e.groupId === a.id && e.time >= now - (12 - i) * 300000 && e.time < now - (11 - i) * 300000).length) }));
+     const heat = groups.map(a => ({ id: a.id, agent: a.agent, values: Array(12).fill(0) })), heatById = new Map(heat.map(a => [a.id, a]));
+     const heatEvent = (groupId, time, count = 1) => { const i = Math.floor((time - (now - 3600000)) / 300000); if (i >= 0 && i < 12) heatById.get(groupId).values[i] += count; };
+     for (const [id, summary] of upstream.summaries || []) if (sessionGroups.has(id)) for (const [time, count] of sessionId ? summary.heat : summary.globalHeat) heatEvent(sessionGroups.get(id).id, time, count);
+     for (const event of displayEvents) if (!upstream.summaries?.has(event.sessionId) || event.kind === 'permission asked') heatEvent(event.groupId, event.time);
     const countGroups = nodes => nodes.reduce((n, a) => n + 1 + countGroups(a.groups), 0);
     const countCalls = id => 1 + sessions.filter(s => s.parent_id === id).reduce((n, s) => n + countCalls(s.id), 0);
     const next = { windowHours: hours, roots: trees.map(t => { const s = groups.find(a => a.id === t.id); return { id: s.id, title: s.title, lastActivity: s.lastActivity, agentCount: 1 + countGroups(t.groups), callCount: countCalls(s.id) }; }), trees, agents: groups, events: displayEvents.sort((a, b) => a.time - b.time).slice(-200), aggregates: { hourly, cacheHit: input + cacheRead ? cacheRead / (input + cacheRead) : 0, heat, today, totalToday: Object.values(today).reduce((n, x) => n + x.total, 0), estimate: Object.values(today).reduce((n, x) => n + x.estimate, 0), ledger: groups.map(({ id, agent, status }) => ({ id, agent, status })) }, approvals, permissionHealth };
@@ -128,9 +142,9 @@ function buildState(sessionId) {
 }
 function stateFor(sessionId) {
   if (!sessionId) return snapshot;
-   const state = scopedSnapshots.get(sessionId) || buildState(sessionId);
-   scopedSnapshots.delete(sessionId); scopedSnapshots.set(sessionId, state);
-   while (scopedSnapshots.size > 20) scopedSnapshots.delete(scopedSnapshots.keys().next().value);
+   const cached = scopedSnapshots.get(sessionId), state = cached && Date.now() - cached.created < 60000 ? cached.state : buildState(sessionId);
+   scopedSnapshots.delete(sessionId); scopedSnapshots.set(sessionId, { state, created: Date.now() });
+   while (scopedSnapshots.size > 4) scopedSnapshots.delete(scopedSnapshots.keys().next().value);
    return state;
 }
 function refresh() {
@@ -138,9 +152,9 @@ function refresh() {
      approvals = upstream.approvals.map(p => ({ ...p, action: clip(p.action), resource: clip(p.resource) })); permissionHealth = upstream.health;
      scopedSnapshots.clear();
      for (const id of rowCache.keys()) if (!upstream.sessions.has(id)) { rowCache.delete(id); agentCache.delete(id); }
-    const next = buildState(), sig = JSON.stringify({ ...next, updatedAt: 0 });
+     const next = buildState(), sig = wireFor(next).signature;
     if (sig !== signature) { signature = sig; snapshot = next; }
-    for (const client of clients) { const state = stateFor(client.sessionId), clientSig = JSON.stringify({ ...state, updatedAt: 0 }); if (client.signature !== clientSig && send(client, `event: state\ndata: ${JSON.stringify(state)}\n\n`)) client.signature = clientSig; }
+     for (const client of clients) { const wire = wireFor(stateFor(client.sessionId)); if (client.signature !== wire.signature && send(client, wire.frame)) client.signature = wire.signature; }
   } catch { console.error('State refresh failed; retaining last snapshot.'); }
 }
 function schedule() { if (!timer) timer = setTimeout(() => { timer = null; refresh(); }, 250); }
@@ -153,13 +167,13 @@ function send(client, data) {
 const files = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
 // Explicit allowlist: no arbitrary filesystem access for vendor/module URLs.
 for (const file of ['flow-webgl.js', ...['three.module.min.js', 'three.core.min.js', ...['EffectComposer', 'RenderPass', 'UnrealBloomPass', 'OutputPass', 'ShaderPass', 'MaskPass', 'Pass'].map(name => `postprocessing/${name}.js`), ...['CopyShader', 'LuminosityHighPassShader', 'OutputShader'].map(name => `shaders/${name}.js`)].map(name => `vendor/three/${name}`)]) files[`/${file}`] = [file, 'text/javascript'];
-const loadedScopes = new Set(), scopeLoads = new Map();
+const loadedScopes = new Map(), scopeLoads = new Map();
 const staticCache = new Map(Object.entries(files).map(([url, [file, type]]) => [url, [readFileSync(join(base, 'public', file)), type]]));
 const importmap = staticCache.get('/')[0].toString().match(/<script type="importmap">(.*?)<\/script>/s)?.[1];
 const csp = `default-src 'self'; script-src 'self' 'sha256-${createHash('sha256').update(importmap || '').digest('base64')}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`;
 try { await upstream.start(); } catch (error) { upstream.stop(); clearTimeout(timer); throw error; }
 refresh();
-const heartbeat = setInterval(() => { for (const c of clients) { if (c.blocked) { clients.delete(c); c.destroy(); } else send(c, ': heartbeat\n\n'); } }, 15000);
+const heartbeat = setInterval(() => { for (const c of clients) { if (c.blocked) { clients.delete(c); c.destroy(); } else { if (c.sessionId) { loadedScopes.set(c.sessionId, Date.now()); upstream.touchScope?.(c.sessionId); } send(c, ': heartbeat\n\n'); } } }, 15000);
 const normalizeHost = host => host.toLowerCase().replace(/^\[|\]$/g, '');
 const allowed = new Set(['localhost', '127.0.0.1', '::1', normalizeHost(config.host), ...(config.allowedHosts || []).map(normalizeHost)]);
 function permitted(authority) { try { const url = new URL(`http://${authority}`); return !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' && allowed.has(normalizeHost(url.hostname)) && Number(url.port || 80) === server.address().port; } catch { return false; } }
@@ -171,11 +185,12 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost'), path = url.pathname, sessionId = url.searchParams.get('session');
   if (path.startsWith('/api/') && req.headers.origin) { let origin; try { origin = new URL(req.headers.origin); } catch {} if (!origin || origin.origin !== req.headers.origin || !['http:', 'https:'].includes(origin.protocol) || !permitted(origin.host)) { res.writeHead(403); return res.end('Forbidden origin'); } }
   if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); return res.end(); }
-  if (sessionId && loadedScopes.has(sessionId) && ['/api/state', '/api/stream'].includes(path)) { loadedScopes.delete(sessionId); loadedScopes.add(sessionId); upstream.touchScope?.(sessionId); }
+   for (const [id, touched] of loadedScopes) if (Date.now() - touched >= 300000) loadedScopes.delete(id);
+   if (sessionId && loadedScopes.has(sessionId) && ['/api/state', '/api/stream'].includes(path)) { loadedScopes.delete(sessionId); loadedScopes.set(sessionId, Date.now()); upstream.touchScope?.(sessionId); }
   if (sessionId && ['/api/state', '/api/stream'].includes(path) && !loadedScopes.has(sessionId)) {
     if (!/^ses_[\w-]+$/.test(sessionId)) { res.writeHead(400); return res.end('Invalid session ID'); }
     try {
-      if (!scopeLoads.has(sessionId)) scopeLoads.set(sessionId, upstream.ensureTree(sessionId).then(() => { loadedScopes.add(sessionId); while (loadedScopes.size > 20) loadedScopes.delete(loadedScopes.values().next().value); refresh(); }).finally(() => scopeLoads.delete(sessionId)));
+       if (!scopeLoads.has(sessionId)) scopeLoads.set(sessionId, upstream.ensureTree(sessionId).then(() => { loadedScopes.set(sessionId, Date.now()); while (loadedScopes.size > 4) loadedScopes.delete(loadedScopes.keys().next().value); refresh(); }).finally(() => scopeLoads.delete(sessionId)));
       await scopeLoads.get(sessionId);
     } catch { res.writeHead(502); return res.end('Unable to load OpenCode session'); }
   }
@@ -183,8 +198,8 @@ const server = http.createServer(async (req, res) => {
     if (clients.size >= 32) { res.writeHead(503); return res.end('Too many clients'); }
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.sessionId = sessionId;
-    const state = stateFor(sessionId); res.signature = JSON.stringify({ ...state, updatedAt: 0 });
-    clients.add(res); send(res, `event: state\ndata: ${JSON.stringify(state)}\n\n`); req.on('close', () => clients.delete(res)); return;
+     const wire = wireFor(stateFor(sessionId)); res.signature = wire.signature;
+     clients.add(res); send(res, wire.frame); req.on('close', () => clients.delete(res)); return;
   }
   if (path === '/api/sessions') {
     if (!snapshot) { res.writeHead(503, { 'Content-Type': 'application/json' }); return res.end('[]'); }
@@ -199,7 +214,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (path === '/api/state' || path === '/api/permission/request') {
     res.writeHead(path === '/api/permission/request' && !permissionHealth.ok ? 502 : 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify(path === '/api/state' ? stateFor(sessionId) : { location: null, data: approvals }));
+     return res.end(path === '/api/state' ? wireFor(stateFor(sessionId)).json : JSON.stringify({ location: null, data: approvals }));
   }
   if (path === '/favicon.ico') { res.writeHead(204); return res.end(); }
   if (staticCache.has(path)) { const [data, type] = staticCache.get(path); res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8` }); return res.end(data); }

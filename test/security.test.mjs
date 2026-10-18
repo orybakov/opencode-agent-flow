@@ -71,10 +71,20 @@ test('full-history scopes use a bounded LRU', async () => {
   const upstream = new Upstream({ window: 4 }, () => {});
   upstream.loadSession = async id => upstream.sessions.set(id, { id, time: { updated: 1 } });
   upstream.descendants = async ids => new Set(ids); upstream.loadMessages = async () => {};
-  for (let i = 0; i < 20; i++) await upstream.ensureTree(`ses_${i}`);
-  upstream.touchScope('ses_0'); await upstream.ensureTree('ses_20');
-  assert.equal(upstream.historyScopes.size, 20); assert(upstream.fullHistory.has('ses_0')); assert(!upstream.fullHistory.has('ses_1'));
+  for (let i = 0; i < 4; i++) await upstream.ensureTree(`ses_${i}`);
+  upstream.touchScope('ses_0'); await upstream.ensureTree('ses_4');
+  assert.equal(upstream.historyScopes.size, 4); assert(upstream.fullHistory.has('ses_0')); assert(!upstream.fullHistory.has('ses_1'));
   upstream.evict(); assert(!upstream.sessions.has('ses_1')); upstream.stop();
+});
+
+test('full-history scope retention expires after five minutes', async () => {
+  const upstream = new Upstream({ window: 4 }, () => {});
+  upstream.loadSession = async id => upstream.sessions.set(id, { id, time: { updated: 1 } });
+  upstream.descendants = async ids => new Set(ids); upstream.loadMessages = async () => {};
+  await upstream.ensureTree('ses_expire');
+  upstream.pruneScopes(Date.now() + 300001);
+  assert.equal(upstream.historyScopes.size, 0); assert.equal(upstream.fullHistory.size, 0);
+  upstream.evict(); assert(!upstream.sessions.has('ses_expire')); upstream.stop();
 });
 
 test('unchanged permission polls do not schedule refreshes', async () => {

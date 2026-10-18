@@ -112,14 +112,14 @@ test('pagination, dormant descendants, location waits, semantic refresh and reco
   } finally { client.stop(); await upstream.close(); }
 });
 
-test('message fetch concurrency is bounded to four', async () => {
+test('message fetch concurrency is bounded to one', async () => {
   let running = 0, maximum = 0;
   const upstream = await mock((req, res) => {
     running++; maximum = Math.max(maximum, running);
     setTimeout(() => { running--; json(res, { data: [], cursor: {} }); }, 25);
   });
   const client = new Upstream(config(upstream.url), () => {});
-  try { await Promise.all(Array.from({ length: 16 }, (_, i) => client.loadMessages(`ses_${i}`))); assert.equal(maximum, 4); }
+  try { await Promise.all(Array.from({ length: 16 }, (_, i) => client.loadMessages(`ses_${i}`))); assert.equal(maximum, 1); }
   finally { client.stop(); await upstream.close(); }
 });
 
