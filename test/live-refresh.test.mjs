@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { Upstream } from '../lib/upstream.mjs';
+import { EventFrames } from '../lib/event-frames.mjs';
 
 const waitFor = async predicate => { const deadline = Date.now() + 6000; while (!predicate()) { if (Date.now() > deadline) throw new Error('Timed out'); await new Promise(r => setTimeout(r, 10)); } };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -105,7 +106,8 @@ test('unknown oversized events preserve a pending force across sync and throttle
     assert(forced[1] - forced[0] >= 290);
     await new Promise(r => setTimeout(r, 350)); assert.equal(forced.length, 2);
     const count = forced.length, calls = f.state.messageCalls;
-    f.raw(`data: ${JSON.stringify({ type: 'session.tool.success', data: { sessionID: 'ses_test', output: 'x'.repeat(70000) } })}\n\n`);
+    const known = new EventFrames().push(`data: ${JSON.stringify({ type: 'session.tool.success', data: { sessionID: 'ses_test', output: 'x'.repeat(70000) } })}\n\n`);
+    assert(!known.unknownOverflow); f.client.oversized(known);
     await waitFor(() => f.state.messageCalls > calls && f.client.loads.size === 0 && f.client.dirty.size === 0);
     assert.equal(forced.length, count);
   } finally { await f.close(); }

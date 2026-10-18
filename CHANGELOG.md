@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-10-18
 
 ### Changed
 
@@ -21,6 +21,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Regression tests for streamed projection, oversized SSE frames, aggregate parity, history bounds and scope expiry.
 
 ### Fixed
+
+- Rebuild older aggregates on identified historical message edits; remove reverted/deleted newer tail entries and exclude base rows beyond the oldest returned anchor. Reconcile each tracked history on a staggered five-to-ten-minute deadline through the shared per-session job, even without version changes.
+- Fall back to a full rebuild when an upstream message page exceeds the requested limit, avoiding duplicate contributions.
+- Request throttled full reconciliation when oversized SSE identifier extraction crosses a discarded block boundary or reaches its 16-ID cap.
 
 - Coalesce all session loads into one running request plus one repeat flag. Live updates replace contributions for the latest 32 messages and stop at a known page; a missing anchor or explicit force rebuilds the older aggregate base. Recent loads update message versions too.
 - Keep permissions/forms, session metadata and descendant discovery on a separate two-job control lane, independent of the one-job history lane.
@@ -54,5 +58,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - WebGL agent trees, grouped parallel calls, tools, approval waits, tokens and estimated costs.
 - Local/remote upstream support, fictional demo data and zero runtime npm dependencies.
 
+[0.1.2]: https://github.com/orybakov/opencode-agent-flow/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/orybakov/opencode-agent-flow/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/orybakov/opencode-agent-flow/releases/tag/v0.1.0

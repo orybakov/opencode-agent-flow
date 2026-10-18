@@ -38,7 +38,14 @@ small latest/context representatives and 200 events per session. Internally,
 32 per-message contributions form a replaceable tail over an older aggregate
 base. A dirty session reads newest pages until a known tail ID is reached;
 changed contributions replace, not add to, their previous snapshots. Missing
-anchors and explicit full reconciliations rebuild the base. Session loads share
+newer IDs are removed up to the oldest returned tail anchor; rows beyond it
+remain exclusively in the base. Missing anchors, oversized pages, identified
+older message edits and explicit full reconciliations rebuild the base. A fixed
+8 KiB older-ID membership filter avoids storing an unbounded ID index; false
+positives only cause extra rebuilds. Independent five-to-ten-minute staggered
+audits also heal older changes without usable SSE message IDs, even when the
+session version is unchanged. Their deadlines do not slide on recent updates;
+the audit scheduler awaits one session before selecting the next. Session loads share
 one per-ID running/repeat job, while permissions/forms and descendant discovery
 use a separate control lane. Exact recent counters scale with distinct timestamps within their
 fixed time windows, not with old history or message/output byte sizes.
@@ -52,7 +59,8 @@ clients; each client retains only a small content hash. Static assets remain
 Buffers, not decoded copies.
 
 Oversized SSE frames retain a bounded set of identifiable session IDs for dirty
-invalidation. Unidentified frames request one pending full reconciliation,
+invalidation. Unidentified or uncertain frames (discarded-block boundaries or
+the 16-ID extraction cap) request one pending full reconciliation,
 including when another sync is already running; those forced recoveries are
 limited to one per ten seconds. Native HTTP(S) requests send
 `Accept-Encoding: identity`, reject 3xx responses without following Location,

@@ -19,5 +19,12 @@ test('oversized SSE frames are discarded with bounded buffering and reconciled',
 test('oversized frames retain bounded session invalidation identifiers', () => {
   const decoder = new EventFrames(100);
   decoder.push('data: {"data":{"sessionID":"ses_target","output":"' + 'x'.repeat(200));
-  assert.deepEqual(decoder.push('x'.repeat(200) + '"}}\n\n'), { frames: [], overflow: true, sessionIds: ['ses_target'] });
+  assert.deepEqual(decoder.push('x'.repeat(200) + '"}}\n\n'), { frames: [], overflow: true, sessionIds: ['ses_target'], unknownOverflow: true });
+});
+
+test('identifier extraction at its 16-ID cap always requests conservative reconciliation', () => {
+  const decoder = new EventFrames(100);
+  const data = Array.from({ length: 17 }, (_, i) => ({ sessionID: `ses_${i}` }));
+  const batch = decoder.push(`data: ${JSON.stringify(data)}\n\n`);
+  assert.equal(batch.sessionIds.length, 16); assert.equal(batch.unknownOverflow, true);
 });

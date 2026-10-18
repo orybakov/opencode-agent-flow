@@ -135,6 +135,30 @@ and tool outputs do not affect their retained size.
 
 ## Prerelease review follow-up
 
+### 0.1.2 convergence and retained-memory bounds
+
+The 32-message tail is an ordered, replaceable prefix over the older base.
+Recent loads remove absent IDs newer than the oldest returned tail anchor and
+exclude rows after that anchor. Pages exceeding the requested ten messages
+trigger an authoritative rebuild instead. Historical message IDs use a fixed
+8 KiB Bloom filter per tracked session; an SSE update identifying an older ID
+requests a rebuild (false positives cause extra work, never missed membership).
+Unhinted older edits/deletions converge through independent per-session audit
+deadlines, staggered at five to ten minutes after each full rebuild. Recent
+traffic does not extend those deadlines. Audits run one session at a time through
+the existing coalescing/history lane; upstream failures or backlog can delay
+completion beyond the nominal deadline.
+
+The four-scope LRU is not a four-scope limit for pinned histories: up to **32
+distinct active SSE scopes** can stay pinned, limited by the SSE-client cap.
+Each scope can include multiple descendant sessions. Each session retains up to
+32 mutable message contributions, each with event arrays bounded at 400 entries
+before compaction (up to 400 × 32 per event-array category), in addition to the
+older base and combined display reductions. Thus 200 displayed events is not
+the total internal retention bound. Exact heat/window timestamp cardinality and
+the number of tracked descendant sessions remain workload-dependent; neither
+the pinned-scope design nor contribution bounds guarantee RSS below 100 MB.
+
 Baseline: `dd0b46b`. Production fixes: `a16dd01` (subsequent commit only extends
 wire-level regression coverage and records this evidence). The deployed `:3340`
 instance was already running that baseline when this follow-up began; it was
