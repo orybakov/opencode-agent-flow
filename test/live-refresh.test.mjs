@@ -30,7 +30,8 @@ async function fixture() {
   await client.start(); await waitFor(() => client.connection === 'connected'); await client.sync();
   const emit = count => { for (const stream of streams) stream.write(Array.from({ length: count }, () => `data: ${JSON.stringify({ type: 'session.usage.updated', data: { sessionID: 'ses_test' } })}\n\n`).join('')); };
   const close = async () => { state.hold?.resolve(); state.listHold?.resolve(); client.stop(); server.closeAllConnections(); await new Promise(r => server.close(r)); };
-  return { state, client, calls, emit, close, now };
+  const raw = text => { for (const stream of streams) stream.write(text); };
+  return { state, client, calls, emit, raw, close, now };
 }
 
 test('real SSE replaces mutable contributions and fetches only the newest known page', async () => {
@@ -91,6 +92,8 @@ test('unknown oversized events preserve a pending force across sync and throttle
     f.client.sync = function(force) { if (force && !this.syncing) forced.push(Date.now()); return original.call(this, force); };
     f.state.listHold = deferred();
     const initial = f.client.sync();
+    f.raw(`data: ${JSON.stringify({ type: 'unknown', data: { output: 'x'.repeat(70000) } })}\n\n`);
+    await waitFor(() => f.client.pendingForce);
     for (let i = 0; i < 50; i++) f.client.oversized({ overflow: true });
     assert.equal(f.client.pendingForce, true); assert.equal(forced.length, 0);
     f.state.listHold.resolve(); f.state.listHold = null; await initial;
@@ -101,8 +104,9 @@ test('unknown oversized events preserve a pending force across sync and throttle
     await waitFor(() => forced.length === 2 && !f.client.syncing);
     assert(forced[1] - forced[0] >= 290);
     await new Promise(r => setTimeout(r, 350)); assert.equal(forced.length, 2);
-    const count = forced.length; f.client.oversized({ overflow: true, sessionIds: ['ses_test'] });
-    await waitFor(() => f.client.loads.size === 0 && f.client.dirty.size === 0);
+    const count = forced.length, calls = f.state.messageCalls;
+    f.raw(`data: ${JSON.stringify({ type: 'session.tool.success', data: { sessionID: 'ses_test', output: 'x'.repeat(70000) } })}\n\n`);
+    await waitFor(() => f.state.messageCalls > calls && f.client.loads.size === 0 && f.client.dirty.size === 0);
     assert.equal(forced.length, count);
   } finally { await f.close(); }
 });

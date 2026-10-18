@@ -132,3 +132,77 @@ reduction all prune these counters. Their cardinality still depends on the
 number of distinct timestamps in those windows: they are **not** a fixed-size
 ring or a hard memory cap under arbitrarily high event rates. Old message bodies
 and tool outputs do not affect their retained size.
+
+## Prerelease review follow-up
+
+Baseline: `dd0b46b`. Production fixes: `a16dd01` (subsequent commit only extends
+wire-level regression coverage and records this evidence). The deployed `:3340`
+instance was already running that baseline when this follow-up began; it was
+neither restarted nor edited here. Temporary probes used `:3397` before and
+`:3396` after, against the same live OpenCode 2.0.30 upstream.
+
+### Request count: two minutes of real activity
+
+A temporary preload wrapped native `http.get`/`https.get` with counters only.
+Counting began after the first complete sync and ended after 120 seconds;
+startup requests and later scope-browsing requests were excluded. The agent's
+ongoing session generated real SSE invalidations. This is a rough live workload
+comparison, not identical replay traffic or a synthetic model benchmark.
+
+| Two-minute requests | Before | After |
+| --- | ---: | ---: |
+| All upstream HTTP requests | 547 | 359 |
+| Message-page requests | 213 | 19 |
+
+Message pages fell approximately 91%; total requests fell approximately 34%.
+An earlier corrected run recorded 374 total / 22 message requests, consistent
+with the same improvement despite different live activity. Permissions/forms
+retain their independent five-second polling cadence; they do not share the
+history loading slot. Metadata/discovery uses two control jobs, histories one.
+
+### Timed memory after the review fixes
+
+The same request-counting preload recorded memory at startup, first complete
+sync and +180 seconds. It imports HTTP(S) to install its counters, so its startup
+figures are not comparable to the earlier simpler preload's startup row.
+No Inspector, heap snapshot or explicit GC was used during these intervals.
+All values below are MiB; each cell is RSS / heapUsed / VmHWM.
+
+| Point | Before review fixes | After review fixes |
+| --- | ---: | ---: |
+| Startup | 59.2 / 7.9 / 60.1 | 58.6 / 7.9 / 60.0 |
+| First full sync | 86.1 / 11.5 / 88.1 | 96.1 / 17.1 / 100.7 |
+| +180 seconds | 87.2 / 15.2 / 89.9 | 90.8 / 15.2 / 103.8 |
+
+The bounded contribution tail trades a small fixed per-session overhead for
+substantially fewer requests. Final +180-second RSS was 95,186,944 B; VmHWM was
+108,875,776 B. This is not a hard peak-memory cap. After browsing six complete
+scopes twice, RSS was 103,890,944 B (99.1 MiB), with 114,618,368 B peak
+(109.3 MiB); those requests were outside the timed request-count interval.
+
+### Verification
+
+- PASS: `node --test`, 40 tests. The added tests cover one-/two-/three-byte
+  escape/exponent/Unicode boundaries; truncated numbers and trailing root data;
+  omitted non-scalar inputs; native redirect/credential/encoding behavior;
+  real HTTP/SSE usage replacement; tail rollover/missing-anchor fallback;
+  coalescing mixed HTTP/SSE bursts into no more than two loads; control requests
+  completing while history is blocked; real oversized SSE frames preserving a
+  deferred force across sync and respecting throttling; pinned scope retention
+  and heartbeat restoration of a deliberately lost full-history scope.
+- PASS: live `/api/sessions` IDs, agentCount/callCount and `/api/state` day/model/
+  hourly tokens, cost, cache hit and event tail matched `:3340`, including after
+  scope browsing. A comparison before browsing also matched heatmap bins exactly.
+- PARTIAL raw heat-bin equality in the final post-browsing capture: one event
+  moved between adjacent bins. Snapshots differed by 246 ms; the matching
+  `tool complete` event lay within those 246 ms at the 30-minute bin boundary.
+  Every group's total heat count matched. This is the sliding-clock boundary,
+  not added/lost history or duplicate usage.
+- PASS: six distinct inactive session scopes, two consecutive traversal rounds:
+  token/model totals, costs, event counts, agentCount and callCount were unchanged
+  after LRU eviction/reload. Event counts were 105, 117, 130, 12, 122 and 200;
+  all totals were nonzero. Separate SSE integration coverage retains the old
+  history total (30, not the recent-only 20) through six other scopes and an
+  explicit scope loss/heartbeat restoration.
+- NOT RUN: a second independent prerelease review or browser visual regression.
+  No version bump, push, release or production service restart was performed.
