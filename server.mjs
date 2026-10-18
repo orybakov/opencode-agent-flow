@@ -130,11 +130,12 @@ function buildState(sessionId) {
       sessionGroups.set(s.id, root);
       return { id: s.id, groups: groupChildren([s.id], s.id) };
     });
-    const displayEvents = events.filter(e => sessionGroups.has(e.sessionId)).map(e => ({ ...e, agent: sessionGroups.get(e.sessionId).agent, groupId: sessionGroups.get(e.sessionId).id }));
+     const eligibleEvents = events.filter(e => sessionGroups.has(e.sessionId));
+     const displayEvents = eligibleEvents.sort((a, b) => a.time - b.time).slice(-200).map(e => ({ ...e, agent: sessionGroups.get(e.sessionId).agent, groupId: sessionGroups.get(e.sessionId).id }));
      const heat = groups.map(a => ({ id: a.id, agent: a.agent, values: Array(12).fill(0) })), heatById = new Map(heat.map(a => [a.id, a]));
      const heatEvent = (groupId, time, count = 1) => { const i = Math.floor((time - (now - 3600000)) / 300000); if (i >= 0 && i < 12) heatById.get(groupId).values[i] += count; };
      for (const [id, summary] of upstream.summaries || []) if (sessionGroups.has(id)) for (const [time, count] of sessionId ? summary.heat : summary.globalHeat) heatEvent(sessionGroups.get(id).id, time, count);
-     for (const event of displayEvents) if (!upstream.summaries?.has(event.sessionId) || event.kind === 'permission asked') heatEvent(event.groupId, event.time);
+     for (const event of eligibleEvents) if (!upstream.summaries?.has(event.sessionId) || event.kind === 'permission asked') heatEvent(sessionGroups.get(event.sessionId).id, event.time);
     const countGroups = nodes => nodes.reduce((n, a) => n + 1 + countGroups(a.groups), 0);
     const countCalls = id => 1 + sessions.filter(s => s.parent_id === id).reduce((n, s) => n + countCalls(s.id), 0);
     const next = { windowHours: hours, roots: trees.map(t => { const s = groups.find(a => a.id === t.id); return { id: s.id, title: s.title, lastActivity: s.lastActivity, agentCount: 1 + countGroups(t.groups), callCount: countCalls(s.id) }; }), trees, agents: groups, events: displayEvents.sort((a, b) => a.time - b.time).slice(-200), aggregates: { hourly, cacheHit: input + cacheRead ? cacheRead / (input + cacheRead) : 0, heat, today, totalToday: Object.values(today).reduce((n, x) => n + x.total, 0), estimate: Object.values(today).reduce((n, x) => n + x.estimate, 0), ledger: groups.map(({ id, agent, status }) => ({ id, agent, status })) }, approvals, permissionHealth };

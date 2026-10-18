@@ -14,6 +14,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Retain four history scopes for five minutes and four scoped snapshots for one minute; share serialized state and small signatures between SSE clients.
 - Bound upstream SSE frames to 64 KiB; oversized payloads reconcile snapshots instead of retaining tool-output buffers.
 - Reconcile versions after the first SSE handshake without immediately loading every unchanged history a second time; reconnects still force full reconciliation.
+- Skip scalar/key allocations in discarded JSON subtrees and truncate event tails before cloning display rows, while preserving complete heatmap counts.
 
 ### Added
 
