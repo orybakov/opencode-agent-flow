@@ -165,6 +165,32 @@ instance was already running that baseline when this follow-up began; it was
 neither restarted nor edited here. Temporary probes used `:3397` before and
 `:3396` after, against the same live OpenCode 2.0.30 upstream.
 
+### 0.1.2 final verification (2026-10-18)
+
+- PASS: `node --test`, **48/48**. Added real HTTP/loadMessages scenarios use
+  100-message histories for historical SSE edits, newest-message deletion/revert,
+  a page crossing the older-base boundary, ignored page limits, independent
+  periodic audits with unchanged versions, and incomplete/16-ID-capped oversized
+  extraction recovering an otherwise unidentified session. Release metadata,
+  `--help` and the dated changelog agree on 0.1.2.
+- PASS: short live comparison of `:3396` against deployed `:3340`: session IDs,
+  agentCount/callCount, day/model/hourly tokens, costs, cache hit, heat and event
+  tail all matched. No production restart or push.
+- PASS: `npm pack --dry-run --json` includes the new `lib/message-ids.mjs` and
+  remaining runtime modules (38 files); no archive was published.
+- NOT RUN: independent review could not start (`Subagent depth limit reached`).
+  Browser/WebGL visual checks were not run; frontend assets were unchanged.
+
+The final temporary 0.1.2 instance used the same native-HTTP counter preload,
+without Inspector/explicit GC. After initial sync RSS / VmHWM was
+100,470,784 / 104,124,416 B (**95.8 / 99.3 MiB**); after 180 seconds it was
+101,814,272 / 114,679,808 B (**97.1 / 109.4 MiB**). This does not meet a hard
+100 MB cap. The two-minute activity counter recorded 474 total / 44 message-page
+requests, but traffic was not replayed and no matched baseline was repeated
+for this final convergence fix. Raw measurements:
+`/tmp/opencode/review-v012.jsonl`. The temporary PID was stopped after the
+measurement; the deployed `:3340` service was not restarted.
+
 ### Request count: two minutes of real activity
 
 A temporary preload wrapped native `http.get`/`https.get` with counters only.
